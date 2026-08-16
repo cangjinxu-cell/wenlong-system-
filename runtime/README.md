@@ -4,15 +4,15 @@
 
 ## 配置
 
-通过环境变量设置模型调用配置：
+通过环境变量设置兼容中转站的模型调用配置：
 
 ```text
-DEEPSEEK_API_KEY=...
-WENLONG_BASE_URL=https://api.deepseek.com
-WENLONG_MODEL=deepseek-v4-flash
+WENLONG_API_KEY=...
+WENLONG_BASE_URL=https://你的中转站地址
+WENLONG_MODEL=中转站提供的模型名
 ```
 
-`WENLONG_MODEL` 也可设为 `deepseek-v4-pro`。密钥只从环境变量读取，不会写入会话或追踪文件。
+三项配置均为必填。密钥只从环境变量读取，不会写入会话或追踪文件；运行时不会要求任何官方服务地址，也不限制模型名。
 
 ## 启动
 

@@ -36,7 +36,7 @@ def 默认传输(url: str, payload: Mapping[str, object], headers: Mapping[str, 
 class OpenAICompatibleAdapter:
     """通用 OpenAI-compatible 协议层；Provider 通过配置提供。"""
 
-    def __init__(self, base_url: str, api_key: str, model: str, provider: str = "deepseek", transport: 传输函数 = 默认传输) -> None:
+    def __init__(self, base_url: str, api_key: str, model: str, provider: str = "openai-compatible-relay", transport: 传输函数 = 默认传输) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model

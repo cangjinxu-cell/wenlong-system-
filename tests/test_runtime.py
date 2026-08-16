@@ -7,18 +7,20 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from adapters.model import 模型结果
 from adapters.openai_compatible import OpenAICompatibleAdapter, 模型调用错误
 from runtime.assets import 宪制加载器, 宪制资产错误
 from runtime.context import 组装上下文
+from runtime.config import 运行配置, 配置错误
 from runtime.core import 文龙运行时, 本轮失败
 from runtime.session import 会话存储, 会话错误
 
 
 class 假适配器:
-    provider = "deepseek"
-    model = "deepseek-v4-flash"
+    provider = "openai-compatible-relay"
+    model = "relay-model"
 
     def __init__(self, fail: bool = False) -> None:
         self.fail = fail
@@ -52,6 +54,15 @@ class 运行时测试(unittest.TestCase):
         (self.root / "wenlong" / "kernel.md").unlink()
         with self.assertRaises(宪制资产错误):
             宪制加载器(self.root).加载()
+
+    def test_通用中转站配置不限制模型名(self) -> None:
+        with patch.dict(os.environ, {"WENLONG_API_KEY": "测试密钥", "WENLONG_BASE_URL": "https://relay.example.test/", "WENLONG_MODEL": "任意中转模型"}, clear=False):
+            config = 运行配置.从环境读取()
+        self.assertEqual("https://relay.example.test", config.base_url)
+        self.assertEqual("任意中转模型", config.model)
+        with patch.dict(os.environ, {"WENLONG_API_KEY": "", "WENLONG_BASE_URL": "", "WENLONG_MODEL": ""}, clear=False):
+            with self.assertRaises(配置错误):
+                运行配置.从环境读取()
 
     def test_上下文顺序且不包含人格草案(self) -> None:
         context = 组装上下文(self.assets, [{"role": "assistant", "content": "历史回答"}], "当前输入")
@@ -89,7 +100,7 @@ class 运行时测试(unittest.TestCase):
         trace = (self.store.traces_dir / f"{session.session_id}.jsonl").read_text(encoding="utf-8")
         self.assertIn('"status":"failure"', trace)
         self.assertNotIn("不应保存的内容", trace)
-        self.assertNotIn("DEEPSEEK_API_KEY", trace)
+        self.assertNotIn("WENLONG_API_KEY", trace)
 
     def test_损坏会话不会被覆盖(self) -> None:
         session = self.store.新建()
@@ -103,7 +114,9 @@ class 运行时测试(unittest.TestCase):
 
     def test_命令行可创建列出并恢复会话(self) -> None:
         environment = os.environ.copy()
-        environment["DEEPSEEK_API_KEY"] = "测试密钥"
+        environment["WENLONG_API_KEY"] = "测试密钥"
+        environment["WENLONG_BASE_URL"] = "https://relay.example.test"
+        environment["WENLONG_MODEL"] = "relay-model"
         environment["WENLONG_HOME"] = str(self.root / "cli-state")
         repository = Path(__file__).resolve().parent.parent
         command = [sys.executable, "-m", "wenlong"]
@@ -123,16 +136,16 @@ class 适配器测试(unittest.TestCase):
             captured.update(url=url, payload=payload, headers=headers, timeout=timeout)
             return {"choices": [{"message": {"content": "模型回答"}}]}
 
-        adapter = OpenAICompatibleAdapter("https://example.test/", "测试密钥", "deepseek-v4-flash", transport=transport)
+        adapter = OpenAICompatibleAdapter("https://example.test/", "测试密钥", "relay-model", transport=transport)
         result = adapter.complete([{"role": "user", "content": "你好"}])
         self.assertEqual("https://example.test/chat/completions", captured["url"])
-        self.assertEqual("deepseek-v4-flash", captured["payload"]["model"])
+        self.assertEqual("relay-model", captured["payload"]["model"])
         self.assertEqual("你好", captured["payload"]["messages"][0]["content"])
         self.assertEqual("模型回答", result.content)
-        self.assertEqual("deepseek", result.provider)
+        self.assertEqual("openai-compatible-relay", result.provider)
 
     def test_无效响应受控失败(self) -> None:
-        adapter = OpenAICompatibleAdapter("https://example.test", "测试密钥", "deepseek-v4-flash", transport=lambda *_: {})
+        adapter = OpenAICompatibleAdapter("https://example.test", "测试密钥", "relay-model", transport=lambda *_: {})
         with self.assertRaises(模型调用错误):
             adapter.complete([{"role": "user", "content": "你好"}])
 
@@ -140,7 +153,7 @@ class 适配器测试(unittest.TestCase):
         def transport(*_):
             raise OSError("网络不可达")
 
-        adapter = OpenAICompatibleAdapter("https://example.test", "测试密钥", "deepseek-v4-flash", transport=transport)
+        adapter = OpenAICompatibleAdapter("https://example.test", "测试密钥", "relay-model", transport=transport)
         with self.assertRaises(模型调用错误):
             adapter.complete([{"role": "user", "content": "你好"}])
 
