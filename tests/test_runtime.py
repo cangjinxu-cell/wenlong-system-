@@ -154,6 +154,33 @@ class 适配器测试(unittest.TestCase):
         with self.assertRaises(模型调用错误):
             adapter.complete([{"role": "user", "content": "你好"}])
 
+    def test_无法识别响应保留安全诊断元数据(self) -> None:
+        body = b"data: [DONE]\n\n"
+
+        class 响应:
+            status = 200
+            headers = {"Content-Type": "text/event-stream; charset=utf-8"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self):
+                return body
+
+        adapter = OpenAICompatibleAdapter("https://example.test", "测试密钥", "relay-model")
+        with patch("adapters.openai_compatible.urlopen", return_value=响应()):
+            with self.assertRaises(模型调用错误) as failed:
+                adapter.complete([{"role": "user", "content": "你好"}])
+        error = failed.exception
+        self.assertEqual("模型服务返回了无法识别的响应。", str(error))
+        self.assertEqual(200, error.http_status)
+        self.assertEqual("text/event-stream; charset=utf-8", error.content_type)
+        self.assertEqual(len(body), error.response_bytes)
+        self.assertNotIn("data:", str(error))
+
 
 class WorkBuddy桥接测试(unittest.TestCase):
     def setUp(self) -> None:
@@ -235,6 +262,30 @@ class WorkBuddy桥接测试(unittest.TestCase):
             self._request("/v1/chat/completions", {"model": "other", "messages": [{"role": "user", "content": "x"}]})
         self.assertEqual(400, failed.exception.code)
         self.assertEqual("relay-model", self.adapter.model)
+
+    def test_失败追踪记录安全上游诊断(self) -> None:
+        class 诊断失败适配器(假适配器):
+            def complete(self, messages):
+                self.contexts.append(messages)
+                raise 模型调用错误(
+                    "模型服务返回了无法识别的响应。",
+                    http_status=200,
+                    content_type="text/event-stream; charset=utf-8",
+                    response_bytes=128,
+                )
+
+        runtime = 文龙运行时(self.runtime.assets, self.store, 诊断失败适配器())
+        with self.assertRaises(本轮失败):
+            runtime.处理外部对话([{"role": "user", "content": "不应进入追踪的正文"}], "diagnostic-request")
+        raw_trace = (self.store.traces_dir / "workbuddy.jsonl").read_text(encoding="utf-8")
+        trace = json.loads(raw_trace.splitlines()[-1])
+        self.assertEqual("failure", trace["status"])
+        self.assertEqual(200, trace["upstream_http_status"])
+        self.assertEqual("text/event-stream; charset=utf-8", trace["upstream_content_type"])
+        self.assertEqual(128, trace["upstream_response_bytes"])
+        self.assertNotIn("不应进入追踪的正文", raw_trace)
+        self.assertNotIn("data: [DONE]", raw_trace)
+        self.assertNotIn("测试密钥", raw_trace)
 
     def test_传输异常受控失败(self) -> None:
         def transport(*_):

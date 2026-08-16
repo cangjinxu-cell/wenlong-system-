@@ -88,6 +88,9 @@ class 文龙运行时:
                 kernel_sha256=self.assets.kernel_sha256,
                 memory_constitution_sha256=self.assets.memory_constitution_sha256,
                 error_type=type(error).__name__,
+                upstream_http_status=getattr(error, "http_status", None),
+                upstream_content_type=getattr(error, "content_type", None),
+                upstream_response_bytes=getattr(error, "response_bytes", None),
             )
             if isinstance(error, 模型调用错误):
                 raise 本轮失败(str(error)) from None

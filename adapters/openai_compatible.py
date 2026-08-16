@@ -11,7 +11,18 @@ from runtime.context import 对话消息
 
 
 class 模型调用错误(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: int | None = None,
+        content_type: str | None = None,
+        response_bytes: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.http_status = http_status
+        self.content_type = content_type
+        self.response_bytes = response_bytes
 
 
 传输函数 = Callable[[str, Mapping[str, object], Mapping[str, str], float], Mapping[str, Any]]
@@ -21,13 +32,29 @@ def 默认传输(url: str, payload: Mapping[str, object], headers: Mapping[str, 
     request = Request(url, data=json.dumps(payload).encode("utf-8"), headers=dict(headers), method="POST")
     try:
         with urlopen(request, timeout=timeout) as response:
-            decoded = json.loads(response.read().decode("utf-8"))
+            raw = response.read()
+            http_status = getattr(response, "status", None)
+            response_headers = getattr(response, "headers", None)
+            content_type = response_headers.get("Content-Type") if response_headers is not None else None
     except HTTPError as error:
-        raise 模型调用错误(f"模型服务返回 HTTP {error.code}。") from None
+        raise 模型调用错误(
+            f"模型服务返回 HTTP {error.code}。",
+            http_status=error.code,
+            content_type=error.headers.get("Content-Type") if error.headers else None,
+        ) from None
     except URLError:
         raise 模型调用错误("无法连接模型服务，请检查网络或服务状态。") from None
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except OSError:
         raise 模型调用错误("模型服务返回了无法识别的响应。") from None
+    try:
+        decoded = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise 模型调用错误(
+            "模型服务返回了无法识别的响应。",
+            http_status=http_status,
+            content_type=content_type,
+            response_bytes=len(raw),
+        ) from None
     if not isinstance(decoded, Mapping):
         raise 模型调用错误("模型服务返回了无效响应。")
     return decoded
