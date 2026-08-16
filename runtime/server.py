@@ -85,8 +85,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
     def _history(self, payload: dict[str, Any]) -> list[对话消息]:
         if payload.get("model") != "wenlong":
             raise 请求错误("model 必须为 wenlong。")
-        if any(key in payload for key in ("tools", "tool_choice", "functions")):
-            raise 请求错误("WorkBuddy Bridge V0.1 暂不支持 tool calling。")
+        # 顶层工具声明只是客户端能力元数据，不进入文龙上下文，也不触发工具调用。
         messages = payload.get("messages")
         if not isinstance(messages, list) or not messages:
             raise 请求错误("messages 必须为非空数组。")
@@ -95,7 +94,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             if not isinstance(message, dict):
                 raise 请求错误("messages 包含无效项。")
             role = message.get("role")
-            if role == "tool" or "tool_calls" in message:
+            if role in {"tool", "function"} or message.get("tool_calls"):
                 raise 请求错误("WorkBuddy Bridge V0.1 暂不支持 tool calling。")
             if role in {"system", "developer"}:
                 continue

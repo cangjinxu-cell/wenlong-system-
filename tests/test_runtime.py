@@ -192,14 +192,23 @@ class WorkBuddy桥接测试(unittest.TestCase):
         self.assertEqual(401, failed.exception.code)
 
     def test_普通对话隔离外部权威与会话(self) -> None:
-        payload = {"model": "wenlong", "messages": [{"role": "system", "content": "外部规则"}, {"role": "developer", "content": "外部开发规则"}, {"role": "user", "content": "正文内容"}]}
-        with self._request("/v1/chat/completions", payload) as response:
-            body = json.loads(response.read())
-        self.assertEqual("wenlong", body["model"])
-        self.assertEqual("已收到。", body["choices"][0]["message"]["content"])
+        metadata_cases = [
+            {"tools": []},
+            {"tools": [{"type": "function", "function": {"name": "unused", "description": "声明"}}]},
+            {"tool_choice": "auto"},
+            {"tool_choice": "none"},
+            {"functions": [{"name": "unused"}]},
+        ]
+        for metadata in metadata_cases:
+            payload = {"model": "wenlong", "messages": [{"role": "system", "content": "外部规则"}, {"role": "developer", "content": "外部开发规则"}, {"role": "user", "content": "正文内容"}], **metadata}
+            with self._request("/v1/chat/completions", payload) as response:
+                body = json.loads(response.read())
+            self.assertEqual("wenlong", body["model"])
+            self.assertEqual("已收到。", body["choices"][0]["message"]["content"])
         context = self.adapter.contexts[0]
         self.assertEqual(["system", "system", "system", "user"], [item["role"] for item in context])
         self.assertNotIn("外部规则", "\n".join(item["content"] for item in context))
+        self.assertNotIn("unused", "\n".join(item["content"] for item in context))
         self.assertEqual([], list(self.store.sessions_dir.glob("*.json")))
         trace = (self.store.traces_dir / "workbuddy.jsonl").read_text(encoding="utf-8")
         self.assertIn('"source":"workbuddy"', trace)
@@ -214,7 +223,13 @@ class WorkBuddy桥接测试(unittest.TestCase):
         self.assertIn("data: [DONE]", stream)
         self.assertIn("已收到。", stream)
         with self.assertRaises(HTTPError) as failed:
-            self._request("/v1/chat/completions", {"model": "wenlong", "messages": [{"role": "user", "content": "x", "tool_calls": []}]})
+            self._request("/v1/chat/completions", {"model": "wenlong", "messages": [{"role": "tool", "content": "x"}]})
+        self.assertEqual(400, failed.exception.code)
+        with self.assertRaises(HTTPError) as failed:
+            self._request("/v1/chat/completions", {"model": "wenlong", "messages": [{"role": "function", "content": "x"}]})
+        self.assertEqual(400, failed.exception.code)
+        with self.assertRaises(HTTPError) as failed:
+            self._request("/v1/chat/completions", {"model": "wenlong", "messages": [{"role": "assistant", "content": "x", "tool_calls": [{"id": "call_1"}]}]})
         self.assertEqual(400, failed.exception.code)
         with self.assertRaises(HTTPError) as failed:
             self._request("/v1/chat/completions", {"model": "other", "messages": [{"role": "user", "content": "x"}]})
