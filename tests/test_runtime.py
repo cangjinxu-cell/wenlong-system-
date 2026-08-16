@@ -141,6 +141,7 @@ class 适配器测试(unittest.TestCase):
         self.assertEqual("https://example.test/chat/completions", captured["url"])
         self.assertEqual("relay-model", captured["payload"]["model"])
         self.assertEqual("你好", captured["payload"]["messages"][0]["content"])
+        self.assertIs(captured["payload"]["stream"], False)
         self.assertEqual("模型回答", result.content)
         self.assertEqual("openai-compatible-relay", result.provider)
 

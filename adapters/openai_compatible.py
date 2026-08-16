@@ -44,7 +44,7 @@ class OpenAICompatibleAdapter:
         self._transport = transport
 
     def complete(self, messages: Sequence[对话消息]) -> 模型结果:
-        payload: dict[str, object] = {"model": self.model, "messages": list(messages)}
+        payload: dict[str, object] = {"model": self.model, "messages": list(messages), "stream": False}
         try:
             response = self._transport(
                 f"{self.base_url}/chat/completions",
