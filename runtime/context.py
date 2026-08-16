@@ -24,3 +24,14 @@ def 组装上下文(assets: 宪制资产, history: Sequence[对话消息], user_
     context.extend({"role": item["role"], "content": item["content"]} for item in history)
     context.append({"role": "user", "content": user_input})
     return context
+
+
+def 组装外部上下文(assets: 宪制资产, history: Sequence[对话消息]) -> list[对话消息]:
+    """外部前台携带历史时，只追加已过滤的 user/assistant 内容。"""
+    context: list[对话消息] = [
+        {"role": "system", "content": 运行包装},
+        {"role": "system", "content": assets.kernel},
+        {"role": "system", "content": assets.memory_constitution},
+    ]
+    context.extend({"role": item["role"], "content": item["content"]} for item in history)
+    return context

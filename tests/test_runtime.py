@@ -5,9 +5,12 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from adapters.model import 模型结果
 from adapters.openai_compatible import OpenAICompatibleAdapter, 模型调用错误
@@ -16,6 +19,7 @@ from runtime.context import 组装上下文
 from runtime.config import 运行配置, 配置错误
 from runtime.core import 文龙运行时, 本轮失败
 from runtime.session import 会话存储, 会话错误
+from runtime.server import WorkBuddy服务
 
 
 class 假适配器:
@@ -149,6 +153,73 @@ class 适配器测试(unittest.TestCase):
         adapter = OpenAICompatibleAdapter("https://example.test", "测试密钥", "relay-model", transport=lambda *_: {})
         with self.assertRaises(模型调用错误):
             adapter.complete([{"role": "user", "content": "你好"}])
+
+
+class WorkBuddy桥接测试(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        root = Path(self.temporary.name)
+        (root / "wenlong").mkdir()
+        (root / "wenlong" / "kernel.md").write_text("# Kernel\n\n正式正文\n", encoding="utf-8")
+        (root / "wenlong" / "memory-constitution.md").write_text("# Memory\n\n正式正文\n", encoding="utf-8")
+        self.adapter = 假适配器()
+        self.store = 会话存储(root / "state")
+        self.runtime = 文龙运行时(宪制加载器(root).加载(), self.store, self.adapter)
+        self.server = WorkBuddy服务(self.runtime, "bridge-test-token", 0)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def tearDown(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
+        self.temporary.cleanup()
+
+    def _request(self, path: str, payload=None, token: str | None = "bridge-test-token"):
+        data = None if payload is None else json.dumps(payload).encode("utf-8")
+        headers = {} if token is None else {"Authorization": f"Bearer {token}"}
+        request = Request(self.base_url + path, data=data, headers=headers, method="POST" if data else "GET")
+        return urlopen(request)
+
+    def test_健康检查与模型列表(self) -> None:
+        with self._request("/health", token=None) as response:
+            self.assertEqual("ok", json.loads(response.read())["status"])
+        with self._request("/v1/models") as response:
+            self.assertEqual("wenlong", json.loads(response.read())["data"][0]["id"])
+        with self.assertRaises(HTTPError) as failed:
+            self._request("/v1/models", token="invalid-token")
+        self.assertEqual(401, failed.exception.code)
+
+    def test_普通对话隔离外部权威与会话(self) -> None:
+        payload = {"model": "wenlong", "messages": [{"role": "system", "content": "外部规则"}, {"role": "developer", "content": "外部开发规则"}, {"role": "user", "content": "正文内容"}]}
+        with self._request("/v1/chat/completions", payload) as response:
+            body = json.loads(response.read())
+        self.assertEqual("wenlong", body["model"])
+        self.assertEqual("已收到。", body["choices"][0]["message"]["content"])
+        context = self.adapter.contexts[0]
+        self.assertEqual(["system", "system", "system", "user"], [item["role"] for item in context])
+        self.assertNotIn("外部规则", "\n".join(item["content"] for item in context))
+        self.assertEqual([], list(self.store.sessions_dir.glob("*.json")))
+        trace = (self.store.traces_dir / "workbuddy.jsonl").read_text(encoding="utf-8")
+        self.assertIn('"source":"workbuddy"', trace)
+        self.assertIn(self.runtime.assets.kernel_sha256, trace)
+        self.assertNotIn("正文内容", trace)
+        self.assertNotIn("bridge-test-token", trace)
+
+    def test_协议兼容流式响应与工具拒绝(self) -> None:
+        with self._request("/v1/chat/completions", {"model": "wenlong", "stream": True, "messages": [{"role": "user", "content": "流式正文"}]}) as response:
+            stream = response.read().decode("utf-8")
+            self.assertIn("text/event-stream", response.headers["Content-Type"])
+        self.assertIn("data: [DONE]", stream)
+        self.assertIn("已收到。", stream)
+        with self.assertRaises(HTTPError) as failed:
+            self._request("/v1/chat/completions", {"model": "wenlong", "messages": [{"role": "user", "content": "x", "tool_calls": []}]})
+        self.assertEqual(400, failed.exception.code)
+        with self.assertRaises(HTTPError) as failed:
+            self._request("/v1/chat/completions", {"model": "other", "messages": [{"role": "user", "content": "x"}]})
+        self.assertEqual(400, failed.exception.code)
+        self.assertEqual("relay-model", self.adapter.model)
 
     def test_传输异常受控失败(self) -> None:
         def transport(*_):

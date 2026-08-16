@@ -8,7 +8,7 @@ from adapters.model import 模型结果, 模型适配器
 from adapters.openai_compatible import OpenAICompatibleAdapter, 模型调用错误
 from runtime.assets import 宪制加载器, 宪制资产
 from runtime.config import 运行配置, 运行目录
-from runtime.context import 组装上下文
+from runtime.context import 对话消息, 组装上下文, 组装外部上下文
 from runtime.session import 会话, 会话存储
 from runtime.trace import 追踪记录器
 
@@ -71,6 +71,38 @@ class 文龙运行时:
             assistant_message_id=assistant.message_id,
         )
         return 轮次结果(updated, result.content)
+
+    def 处理外部对话(self, history: list[对话消息], request_id: str) -> 模型结果:
+        """供外部前台使用：不创建或写入 Wenlong CLI Session。"""
+        started_at = self.traces.开始时间()
+        try:
+            result = self.adapter.complete(组装外部上下文(self.assets, history))
+        except Exception as error:
+            self.traces.记录工作台(
+                request_id=request_id,
+                started_at=started_at,
+                completed_at=self.traces.完成时间(),
+                status="failure",
+                adapter="openai-compatible",
+                upstream_model=getattr(self.adapter, "model", "unknown"),
+                kernel_sha256=self.assets.kernel_sha256,
+                memory_constitution_sha256=self.assets.memory_constitution_sha256,
+                error_type=type(error).__name__,
+            )
+            if isinstance(error, 模型调用错误):
+                raise 本轮失败(str(error)) from None
+            raise 本轮失败("本轮未完成。") from None
+        self.traces.记录工作台(
+            request_id=request_id,
+            started_at=started_at,
+            completed_at=self.traces.完成时间(),
+            status="success",
+            adapter="openai-compatible",
+            upstream_model=result.model,
+            kernel_sha256=self.assets.kernel_sha256,
+            memory_constitution_sha256=self.assets.memory_constitution_sha256,
+        )
+        return result
 
     def _记录失败(self, session_id: str, turn_id: str, started_at: str, error: Exception) -> None:
         self.traces.记录(

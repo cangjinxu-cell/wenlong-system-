@@ -23,6 +23,14 @@ class 追踪记录器:
             handle.flush()
             os.fsync(handle.fileno())
 
+    def 记录工作台(self, **fields: object) -> None:
+        event = {"trace_id": str(uuid.uuid4()), "source": "workbuddy", **fields}
+        path = self.traces_dir / "workbuddy.jsonl"
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
     @staticmethod
     def 开始时间() -> str:
         return _时间()

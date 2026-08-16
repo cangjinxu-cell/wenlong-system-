@@ -35,3 +35,28 @@ python -m wenlong sessions
 ```bash
 python -m unittest discover -s tests
 ```
+
+## WorkBuddy 接入
+
+启动本机 Bridge：
+
+```bash
+python -m wenlong serve
+python -m wenlong serve --port 8766
+```
+
+默认地址为 `http://127.0.0.1:8765/v1`，只监听本机，不会开放到局域网或公网。启动前除上游运行配置外，还必须设置 `WENLONG_BRIDGE_API_KEY`。
+
+WorkBuddy Custom Model 使用以下设置：
+
+```text
+URL: http://127.0.0.1:8765/v1
+API Key: WENLONG_BRIDGE_API_KEY 的值
+Model: wenlong
+```
+
+WorkBuddy 是交互前台，不是文龙身份来源；实际底层模型仍完全由 Wenlong Runtime 的上游配置决定。WorkBuddy 当前任务历史由 WorkBuddy 管理，Bridge 不会将其复制进文龙 CLI 会话，也不会自动写入正式长期记忆。
+
+Bridge 提供 `/health`、`/v1/models` 与 `/v1/chat/completions`。外部 system 与 developer 消息不会获得 Kernel 或 Memory Constitution 的权威；Skills、MCP 与 tool calling 尚未接入。
+
+客户端请求 `stream=true` 时，Bridge 会在获得完整上游结果后按 SSE 协议发送一个内容块和 `[DONE]`。这是协议兼容，不是真正的上游逐 token 流式传输。
