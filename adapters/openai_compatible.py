@@ -42,8 +42,12 @@ def 默认传输(url: str, payload: Mapping[str, object], headers: Mapping[str, 
             http_status=error.code,
             content_type=error.headers.get("Content-Type") if error.headers else None,
         ) from None
-    except URLError:
+    except URLError as error:
+        if isinstance(error.reason, TimeoutError):
+            raise 模型调用错误("模型服务响应超时。") from None
         raise 模型调用错误("无法连接模型服务，请检查网络或服务状态。") from None
+    except TimeoutError:
+        raise 模型调用错误("模型服务响应超时。") from None
     except OSError:
         raise 模型调用错误("模型服务返回了无法识别的响应。") from None
     try:
@@ -77,10 +81,12 @@ class OpenAICompatibleAdapter:
                 f"{self.base_url}/chat/completions",
                 payload,
                 {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                60.0,
+                120.0,
             )
         except 模型调用错误:
             raise
+        except TimeoutError:
+            raise 模型调用错误("模型服务响应超时。") from None
         except OSError:
             raise 模型调用错误("无法连接模型服务，请检查网络或服务状态。") from None
         try:

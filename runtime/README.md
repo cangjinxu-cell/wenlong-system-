@@ -60,3 +60,9 @@ WorkBuddy 是交互前台，不是文龙身份来源；实际底层模型仍完�
 Bridge 提供 `/health`、`/v1/models` 与 `/v1/chat/completions`。外部 system 与 developer 消息不会获得 Kernel 或 Memory Constitution 的权威；Skills、MCP 与 tool calling 尚未接入。
 
 客户端请求 `stream=true` 时，Bridge 会在获得完整上游结果后按 SSE 协议发送一个内容块和 `[DONE]`。这是协议兼容，不是真正的上游逐 token 流式传输。
+
+## 原生页面
+
+运行 `python -m wenlong serve` 后，访问 `http://127.0.0.1:8765/` 即可使用本机页面。页面只使用离线 HTML、CSS 和原生 JavaScript；Bridge API Key 仅保存在当前页面内存，刷新页面即丢失。
+
+页面维护的前台 history 不等于 Wenlong CLI Session，也不等于正式长期记忆。每次发送固定使用 `stream: false`，且页面同一时刻只允许一个请求，避免重复并发调用。页面不会发送 system、developer 或任何工具调用字段。

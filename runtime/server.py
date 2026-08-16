@@ -7,6 +7,7 @@ import time
 import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -33,7 +34,9 @@ class _BridgeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
-        if path == "/health":
+        if path == "/":
+            self._frontend()
+        elif path == "/health":
             self._json(HTTPStatus.OK, {"status": "ok", "service": "wenlong", "version": "0.1"})
         elif path == "/v1/models":
             if self._authorized():
@@ -110,6 +113,19 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         body = json.dumps(value, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _frontend(self) -> None:
+        path = Path(__file__).resolve().parent.parent / "web" / "index.html"
+        try:
+            body = path.read_bytes()
+        except OSError:
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "本机页面不可用。", "frontend_error")
+            return
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

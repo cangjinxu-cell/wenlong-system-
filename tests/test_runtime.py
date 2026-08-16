@@ -146,6 +146,7 @@ class 适配器测试(unittest.TestCase):
         self.assertEqual("relay-model", captured["payload"]["model"])
         self.assertEqual("你好", captured["payload"]["messages"][0]["content"])
         self.assertIs(captured["payload"]["stream"], False)
+        self.assertEqual(120.0, captured["timeout"])
         self.assertEqual("模型回答", result.content)
         self.assertEqual("openai-compatible-relay", result.provider)
 
@@ -181,6 +182,16 @@ class 适配器测试(unittest.TestCase):
         self.assertEqual(len(body), error.response_bytes)
         self.assertNotIn("data:", str(error))
 
+    def test_超时返回明确错误(self) -> None:
+        def transport(*_):
+            raise TimeoutError()
+
+        adapter = OpenAICompatibleAdapter("https://example.test", "测试密钥", "relay-model", transport=transport)
+        with self.assertRaises(模型调用错误) as failed:
+            adapter.complete([{"role": "user", "content": "你好"}])
+        self.assertEqual("模型服务响应超时。", str(failed.exception))
+        self.assertNotEqual("模型服务返回了无法识别的响应。", str(failed.exception))
+
 
 class WorkBuddy桥接测试(unittest.TestCase):
     def setUp(self) -> None:
@@ -210,6 +221,13 @@ class WorkBuddy桥接测试(unittest.TestCase):
         return urlopen(request)
 
     def test_健康检查与模型列表(self) -> None:
+        with self._request("/", token=None) as response:
+            page = response.read().decode("utf-8")
+            self.assertIn("text/html", response.headers["Content-Type"])
+        self.assertIn("文龙", page)
+        self.assertIn("Wenlong", page)
+        self.assertNotIn("bridge-test-token", page)
+        self.assertNotIn("localStorage", page)
         with self._request("/health", token=None) as response:
             self.assertEqual("ok", json.loads(response.read())["status"])
         with self._request("/v1/models") as response:

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>文龙 Wenlong</title>
+  <style>
+    :root { color-scheme: light; font-family: "Microsoft YaHei", system-ui, sans-serif; color: #17212b; background: #eef2f4; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; grid-template-rows: auto 1fr; }
+    header { padding: 18px clamp(16px, 4vw, 56px); background: #153a52; color: #fff; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: 0; }
+    #status { font-size: 14px; color: #d9ecf6; text-align: right; }
+    main { width: min(960px, 100%); margin: 0 auto; padding: 18px 16px; display: grid; grid-template-rows: auto minmax(260px, 1fr) auto; gap: 12px; min-height: 0; }
+    .settings { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    label { font-size: 14px; font-weight: 600; }
+    input, textarea { border: 1px solid #9aabb6; border-radius: 4px; font: inherit; color: inherit; background: #fff; }
+    input { padding: 8px 10px; min-width: 230px; }
+    #messages { overflow-y: auto; border: 1px solid #c5d1d8; background: #fff; padding: 16px; min-height: 0; }
+    .message { max-width: 82%; margin: 0 0 12px; padding: 10px 12px; border-radius: 4px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .user { margin-left: auto; background: #d9eef0; }
+    .assistant { background: #edf1f4; }
+    .role { display: block; font-size: 12px; color: #50616d; margin-bottom: 3px; }
+    .composer { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: end; }
+    textarea { resize: vertical; min-height: 76px; max-height: 220px; padding: 10px; width: 100%; }
+    button { border: 1px solid #1b6671; border-radius: 4px; background: #19717c; color: #fff; padding: 10px 15px; font: inherit; cursor: pointer; }
+    button.secondary { background: #fff; color: #28434c; border-color: #8da1aa; }
+    button:disabled { opacity: .55; cursor: wait; }
+    @media (max-width: 620px) { .composer { grid-template-columns: 1fr auto; } textarea { grid-column: 1 / -1; } header { align-items: flex-start; flex-direction: column; } #status { text-align: left; } }
+  </style>
+</head>
+<body>
+  <header><h1>文龙 Wenlong</h1><div id="status">正在检查 Bridge 状态…</div></header>
+  <main>
+    <div class="settings"><label for="bridge-key">Bridge API Key</label><input id="bridge-key" type="password" autocomplete="off" placeholder="仅保存在当前页面内存"><span>Endpoint: /v1/chat/completions</span></div>
+    <section id="messages" aria-live="polite"></section>
+    <div class="composer"><textarea id="input" placeholder="输入要与文龙讨论的内容。Shift+Enter 换行"></textarea><button id="clear" class="secondary" type="button">清空对话</button><button id="send" type="button">发送</button></div>
+  </main>
+  <script>
+    const history = [];
+    let busy = false;
+    const status = document.querySelector('#status');
+    const messages = document.querySelector('#messages');
+    const input = document.querySelector('#input');
+    const key = document.querySelector('#bridge-key');
+    const send = document.querySelector('#send');
+    const clear = document.querySelector('#clear');
+    function setStatus(text) { status.textContent = text; }
+    function render(role, content) {
+      const item = document.createElement('article'); item.className = `message ${role}`;
+      const label = document.createElement('span'); label.className = 'role'; label.textContent = role === 'user' ? '主公' : '文龙';
+      const body = document.createElement('div'); body.textContent = content;
+      item.append(label, body); messages.append(item); messages.scrollTop = messages.scrollHeight;
+    }
+    async function checkHealth() {
+      try { const response = await fetch('/health'); if (!response.ok) throw new Error(); setStatus('Bridge 已连接 · http://127.0.0.1:8765'); }
+      catch { setStatus('无法连接 Bridge · 请确认 python -m wenlong serve 正在运行'); }
+    }
+    async function submit() {
+      const content = input.value.trim();
+      if (busy || !content) return;
+      if (!key.value) { setStatus('请输入 Bridge API Key。'); key.focus(); return; }
+      busy = true; send.disabled = true; setStatus('正在请求文龙…');
+      history.push({ role: 'user', content }); render('user', content); input.value = '';
+      try {
+        const response = await fetch('/v1/chat/completions', { method: 'POST', headers: { 'Authorization': `Bearer ${key.value}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'wenlong', stream: false, messages: history }) });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error && data.error.message ? data.error.message : 'Bridge 返回了无效响应。');
+        const answer = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (typeof answer !== 'string') throw new Error('Bridge 未返回有效回答。');
+        history.push({ role: 'assistant', content: answer }); render('assistant', answer); setStatus('请求完成。');
+      } catch (error) { render('assistant', `文龙请求失败：\n${error.message || 'Bridge 连接错误。'}`); setStatus('请求失败。'); }
+      finally { busy = false; send.disabled = false; input.focus(); }
+    }
+    send.addEventListener('click', submit);
+    input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(); } });
+    clear.addEventListener('click', () => { history.length = 0; messages.replaceChildren(); setStatus('当前页面对话已清空。'); input.focus(); });
+    checkHealth();
+  </script>
+</body>
+</html>
